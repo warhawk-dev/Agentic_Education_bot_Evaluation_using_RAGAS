@@ -1,0 +1,14 @@
+
+__pycache__/
+*.py[cod]
+
+myenv/
+
+.env
+
+uploads/
+
+chroma_db/
+
+.DS_Store
+Thumbs.db
