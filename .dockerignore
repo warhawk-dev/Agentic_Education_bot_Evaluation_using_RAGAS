@@ -1,0 +1,12 @@
+myvenv/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+.env
+.vscode/
+uploads/*
+chroma_db/*
+eval.json
+download.png
+README.md
