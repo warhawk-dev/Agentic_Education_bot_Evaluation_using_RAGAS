@@ -178,10 +178,6 @@ def retrieve_node(state: RAGState) -> dict:
     
     return {"retrieved_text": retrieved_text}
 
-class GradeResult(BaseModel):
-    """Relevance grade for a set of retrieved passages against a question."""
-    is_relevant: bool = Field(description="Whether the passages are relevant enough to answer the question.")
-
 def grade_node(state: RAGState) -> dict:
     grade_chain = (
         PromptTemplate.from_template(
