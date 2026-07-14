@@ -189,11 +189,16 @@ def grade_node(state: RAGState) -> dict:
         )
         | llm.with_structured_output(GradeResult)
     )
-    result = grade_chain.invoke({
-        "question": state.question,
-        "passages": state.retrieved_text[:1500],
-    })
-    return {"is_relevant": result.is_relevant}
+    try:
+        result = grade_chain.invoke({
+            "question": state.question,
+            "passages": state.retrieved_text[:1500],
+        })
+        return {"is_relevant": result.is_relevant}
+    except Exception:
+        # If the model fails to produce valid structured output, default to "not relevant"
+        # so the graph safely falls through to rephrase/retry rather than crashing.
+        return {"is_relevant": False}
 
 
 def rephrase_node(state: RAGState) -> dict:
