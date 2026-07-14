@@ -234,16 +234,26 @@ def generate_node(state: RAGState) -> dict:
         )
         | llm.with_structured_output(FinalAnswer)
     )
-    result = generate_chain.invoke({
-        "question": state.question,
-        "passages": state.retrieved_text,
-    })
-    return {
-        "answer": result.answer,
-        "summary": result.summary,
-        "source": result.source,
-        "page": result.page,
-    }
+    try:
+        result = generate_chain.invoke({
+            "question": state.question,
+            "passages": state.retrieved_text,
+        })
+        return {
+            "answer": result.answer,
+            "summary": result.summary,
+            "source": result.source,
+            "page": result.page,
+        }
+    except Exception:
+        # Model failed to produce valid structured output (e.g. returned plain text
+        # instead of a proper tool call). Fail safely instead of crashing the request.
+        return {
+            "answer": "Sorry, something went wrong while generating an answer. Please try rephrasing your question.",
+            "summary": "",
+            "source": "",
+            "page": "",
+        }
 
 # ── Routing ───────────────────────────────────────────────────────────────────
 
