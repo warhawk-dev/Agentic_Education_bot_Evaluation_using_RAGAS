@@ -170,9 +170,17 @@ class RAGState(BaseModel):
 
 def retrieve_node(state: RAGState) -> dict:
     result = agent.invoke({"messages": [{"role": "user", "content": state.question}]})
-    retrieved_text = result["messages"][-2].content  # ToolMessage — actual retrieved content
+    
+    # Find the ToolMessage explicitly, rather than assuming its position
+    from langchain_core.messages import ToolMessage
+    tool_messages = [m for m in result["messages"] if isinstance(m, ToolMessage)]
+    retrieved_text = tool_messages[-1].content if tool_messages else ""
+    
     return {"retrieved_text": retrieved_text}
 
+class GradeResult(BaseModel):
+    """Relevance grade for a set of retrieved passages against a question."""
+    is_relevant: bool = Field(description="Whether the passages are relevant enough to answer the question.")
 
 def grade_node(state: RAGState) -> dict:
     grade_chain = (
@@ -180,18 +188,16 @@ def grade_node(state: RAGState) -> dict:
             "Question: {question}\n\n"
             "Passages:\n{passages}\n\n"
             "Do these passages contain specific information that directly answers the question? "
-            "Reply YES only if the passages explicitly contain the answer. "
-            "If the passages are about a completely different topic, reply NO. "
-            "Reply only YES or NO."
+            "Answer true only if the passages explicitly contain the answer. "
+            "If the passages are about a completely different topic, answer false."
         )
-        | llm
-        | StrOutputParser()
+        | llm.with_structured_output(GradeResult)
     )
-    answer = grade_chain.invoke({
+    result = grade_chain.invoke({
         "question": state.question,
         "passages": state.retrieved_text[:1500],
     })
-    return {"is_relevant": "YES" in answer.upper()}
+    return {"is_relevant": result.is_relevant}
 
 
 def rephrase_node(state: RAGState) -> dict:
