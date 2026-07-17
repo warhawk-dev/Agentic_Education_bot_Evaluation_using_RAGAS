@@ -365,9 +365,10 @@ graph.add_node("generate", generate_node)
 graph.add_node("blocked",  blocked_node)
 
 graph.set_entry_point("retrieve")
-graph.add_edge("retrieve", "grade")
+graph.add_conditional_edges("retrieve", after_retrieve, {"grade": "grade", "blocked": "blocked"})
 graph.add_conditional_edges("grade", after_grade, {"generate": "generate", "rephrase": "rephrase"})
 graph.add_edge("rephrase", "retrieve")
 graph.add_edge("generate", END)
+graph.add_edge("blocked", END)
 
 rag_app = graph.compile()
