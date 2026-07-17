@@ -243,17 +243,21 @@ class RAGState(BaseModel):
     source:         str   = Field(default="")
     page:           str   = Field(default="")
     retry_count:    int   = Field(default=0)
+    blocked:        bool  = Field(default=False)
 
 # ── Graph nodes ───────────────────────────────────────────────────────────────
 
 def retrieve_node(state: RAGState) -> dict:
-    result = agent.invoke({"messages": [{"role": "user", "content": state.question}]})
-    
-    # Find the ToolMessage explicitly, rather than assuming its position
-    from langchain_core.messages import ToolMessage
-    tool_messages = [m for m in result["messages"] if isinstance(m, ToolMessage)]
-    retrieved_text = tool_messages[-1].content if tool_messages else ""
-    
+    try:
+        result = agent.invoke({"messages": [{"role": "user", "content": state.question}]})
+        messages = result["messages"]
+        tool_messages = [m for m in messages if isinstance(m, ToolMessage)]
+        if not tool_messages and messages and isinstance(messages[-1], AIMessage) and messages[-1].content == MESSAGE_FOR_BLOCKED_QUESTION:
+            return {"retrieved_text":"", "blocked":True}
+        retrieved_text = tool_messages[-1].content if tool_messages else ""
+    except Exception:
+        logger.exception("Agent retrieval failed for question: %r",state.question[:200])
+        retrieved_text = ""
     return {"retrieved_text": retrieved_text}
 
 def grade_node(state: RAGState) -> dict:
@@ -275,7 +279,6 @@ def grade_node(state: RAGState) -> dict:
         return {"is_relevant": result.is_relevant}
     except Exception:
         # If the model fails to produce valid structured output, default to "not relevant"
-        # so the graph safely falls through to rephrase/retry rather than crashing.
         return {"is_relevant": False}
 
 
