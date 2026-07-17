@@ -10,6 +10,13 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain.agents import create_agent
 from langgraph.graph import StateGraph, END
 from pydantic import BaseModel, Field
+import logging
+from typing import Any
+from langchain_core.messages import ToolMessage, AIMessage
+from langchain.agents.middleware import before_agent, wrap_tool_call, AgentState
+from langgraph.runtime import Runtime
+
+logger = logging.getLogger("agentic_rag")
 
 # ── Models ────────────────────────────────────────────────────────────────────
 
@@ -146,12 +153,83 @@ class FinalAnswer(BaseModel):
     source: str = Field(description="The PDF filename the answer was drawn from, e.g. Physics.pdf.")
     page: str = Field(description="The page number(s) the answer was drawn from.")
 
+#  GUARDRAILS  —  a simple prompt-injection filter
+#  1) DIRECT injection  -> the user types the attack straight into the chat box. We catch this by checking the QUESTION before it ever reaches the model.
+#  2) INDIRECT injection -> someone hides the attack inside an uploaded PDF. trustworthy textbook content. We catch this by checking the TOOL RESULT
+MESSAGE_FOR_BLOCKED_QUESTION = "This request couldn't be processed. Please rephrase your question."
+MESSAGE_FOR_BLOCKED_PDF_CONTENT = "[Retrieved content withheld: flagged as a potential prompt injection attempt.]"
+INJECTION_PHRASES = [
+    # Trying to override or erase earlier instructions
+    "ignore previous instructions",
+    "ignore all previous instructions",
+    "ignore the above instructions",
+    "disregard previous instructions",
+    "forget everything above",
+    "override your instructions",
+    "new instructions:",
+    "system prompt",
+    "reveal your prompt",
+    "reveal your system prompt",
+    "you are now a",
+    "you are now an",
+    "act as a",
+    "act as an",
+    "pretend you are",
+    "pretend to be",
+    "jailbreak",
+    "do anything now",
+    "without any restrictions",
+]
+
+def looks_like_prompt_injection(text: str)->bool:
+    """The main guardrail check: True if 'text' contains any of the known injection phrases"""
+    if not text or not text.strip():
+        return False
+    lowercase_text = text.lower()
+    is_suspicious = any(phrase in lowercase_text for phrase in INJECTION_PHRASES) 
+
+    if is_suspicious:
+        logger.warning(f"Blocked possible prompt injection: {text[:100]!r}")
+
+    return is_suspicious
+
+@before_agent(can_jump_to=["end"])
+def block_direct_injection(state: AgentState, runtime: Runtime)-> dict[str, Any] | None:
+    """Runs once, right when the agent starts - before the question reaches the model at all"""
+    if not state["messages"]:
+        return None
+    first_message = state["messges"][0]
+    if first_message.type != "human":
+        return None
+    
+    question_text = first_message.content
+    if not isinstance(question_text, str):
+        question_text = str(question_text)
+
+    if looks_like_prompt_injection(question_text):
+        return{
+            "messages": [{"role": "assistant", "content": MESSAGE_FOR_BLOCKED_QUESTION}],
+            "jump_to": "end",
+        }
+    return None
+
+@wrap_tool_call
+def block_indirect_injection(request, handler):
+    "checks the result of the tool for INDIRECT injection before that text is allowed back into the agent's conversation"
+    tool_result = handler(request) #gets the normal result from the tool
+    result_text = tool_result.content if isinstance(tool_result, ToolMessage) else None
+    if isinstance(result_text, str) and looks_like_prompt_injection(result_text):
+        return ToolMessage(content=MESSAGE_FOR_BLOCKED_PDF_CONTENT, tool_call_id= request.tool_call["id"],)
+    return tool_result
+
+
 # ── Agent ─────────────────────────────────────────────────────────────────────
 
 agent = create_agent(
     model=llm,
     tools=all_tools,
     system_prompt="You are a retrieval assistant. You MUST use the provided tools to search for information. NEVER generate answers from your own knowledge.",
+    middleware=[block_direct_injection, block_indirect_injection],
 )
 
 # ── RAG State ─────────────────────────────────────────────────────────────────
