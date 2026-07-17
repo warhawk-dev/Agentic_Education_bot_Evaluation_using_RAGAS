@@ -260,6 +260,15 @@ def retrieve_node(state: RAGState) -> dict:
         retrieved_text = ""
     return {"retrieved_text": retrieved_text}
 
+def blocked_node(state: RAGState) -> dict:
+    "reaches only when the guardrail blocked the request"
+    return {
+        "answer": MESSAGE_FOR_BLOCKED_QUESTION,
+        "summary": "",
+        "source": "",
+        "page": "",
+    }
+
 def grade_node(state: RAGState) -> dict:
     grade_chain = (
         PromptTemplate.from_template(
@@ -343,6 +352,9 @@ def after_grade(state: RAGState) -> str:
         return "generate"
     else:
         return "rephrase"
+    
+def after_retrieve(state: RAGState)-> str:
+    return "blocked" if state.blocked else "grade"
 
 graph = StateGraph(RAGState)
 
@@ -350,6 +362,7 @@ graph.add_node("retrieve", retrieve_node)
 graph.add_node("grade",    grade_node)
 graph.add_node("rephrase", rephrase_node)
 graph.add_node("generate", generate_node)
+graph.add_node("blocked",  blocked_node)
 
 graph.set_entry_point("retrieve")
 graph.add_edge("retrieve", "grade")
